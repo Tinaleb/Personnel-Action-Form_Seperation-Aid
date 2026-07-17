@@ -64,6 +64,24 @@
   .toast.show{opacity:1;}
   .cheat{font-size:12.5px; color:var(--slate); line-height:1.55;}
   .cheat b{color:var(--ink);}
+  /* signature */
+  .sigstate{color:var(--slate); font-weight:600;}
+  .sigstate.saved{color:var(--ok);}
+  .sigwrap{margin-top:12px;}
+  .sigtabs{max-width:320px; margin-bottom:12px;}
+  .sigpanel{margin-bottom:12px;}
+  #sigCanvas{width:100%; max-width:600px; height:150px; border:1px solid var(--line); border-radius:6px;
+    background:#fff; touch-action:none; cursor:crosshair; display:block;}
+  .sigpreview{min-height:70px; border:1px solid var(--line); border-radius:6px; background:#fff; margin-top:10px;
+    display:flex; align-items:center; justify-content:center; padding:6px;}
+  .sigpreview img{max-height:80px; max-width:100%;}
+  .sigpreview .typed{font-size:38px; color:#0f1e5a; line-height:1;}
+  .sigfonts{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+  .sigfonts button{padding:7px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; font-size:15px;}
+  .sigfonts button.on{border-color:var(--red); background:#FBF2F2; color:var(--red); font-weight:600;}
+  .sigactions{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;}
+  .sigremember{font-size:12.5px; color:var(--slate); font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer;}
+  .sigremember input{width:auto;}
   footer{max-width:1180px; margin:0 auto; padding:8px 20px 26px; font-size:12px; color:var(--slate);}
 </style>
 </head>
@@ -199,13 +217,52 @@
         </div>
       </details>
 
-      <details>
+      <details id="reqDetails">
         <summary>Requested by</summary>
         <div class="grid">
           <div><label>Name / title</label><input type="text" id="reqBy"></div>
           <div><label>Date</label><input type="date" id="reqDate"></div>
         </div>
         <div class="hint" style="margin-top:8px;">Saved on this device so you never retype it.</div>
+      </details>
+
+      <details id="sigDetails">
+        <summary>Signature (optional) — <span id="sigState" class="sigstate">none saved</span></summary>
+        <div class="sigwrap">
+          <div class="seg sigtabs" id="sigTabs">
+            <button type="button" data-t="draw" class="on">Draw</button>
+            <button type="button" data-t="type">Type</button>
+            <button type="button" data-t="upload">Upload</button>
+          </div>
+
+          <div class="sigpanel" data-panel="draw">
+            <canvas id="sigCanvas" width="600" height="150"></canvas>
+            <div class="hint">Sign with your mouse, finger, or stylus.</div>
+          </div>
+
+          <div class="sigpanel" data-panel="type" hidden>
+            <input type="text" id="sigTypeInput" placeholder="Type your name">
+            <div class="sigpreview" id="sigTypePreview"></div>
+            <div class="sigfonts" id="sigFonts">
+              <button type="button" data-f="'Brush Script MT', cursive" class="on">Script</button>
+              <button type="button" data-f="'Segoe Script', 'Comic Sans MS', cursive">Casual</button>
+              <button type="button" data-f="'Palatino Linotype', 'Book Antiqua', serif" style="font-style:italic">Formal</button>
+            </div>
+          </div>
+
+          <div class="sigpanel" data-panel="upload" hidden>
+            <input type="file" id="sigUpload" accept="image/png,image/jpeg">
+            <div class="sigpreview" id="sigUploadPreview"></div>
+            <div class="hint">A transparent PNG works best. Photos of a signature on white paper are fine too.</div>
+          </div>
+
+          <div class="sigactions">
+            <button type="button" class="btn primary" id="sigSave">Save signature</button>
+            <button type="button" class="btn ghost" id="sigClear">Clear</button>
+            <label class="sigremember"><input type="checkbox" id="sigRemember"> Remember on this device</label>
+          </div>
+          <div class="hint">When saved, your signature is stamped on the <b>Requested by</b> line of every PAF you download. The Manager / Approved-by line stays blank for their own signature.</div>
+        </div>
       </details>
 
       <div class="actions">
@@ -450,6 +507,22 @@ async function buildPdf(d){
   C("Eligible for Rehire", d.rehire==="yes");
   C("InEligible for Rehire", d.rehire==="no");
 
+  // Stamp signature on the "Requested by" (Requestor) signature line, if saved
+  const sig=sigBytes();
+  if(sig){
+    try{
+      const sigField=form.getField("Requestor Signature");
+      const rect=sigField.acroField.getWidgets()[0].getRectangle();
+      const img = sig.isPng ? await doc.embedPng(sig.bytes) : await doc.embedJpg(sig.bytes);
+      const maxW=rect.width, maxH=rect.height+6;
+      const scale=Math.min(maxW/img.width, maxH/img.height);
+      const w=img.width*scale, h=img.height*scale;
+      const page=doc.getPages()[0];
+      page.drawImage(img, { x: rect.x + (maxW-w)/2, y: rect.y, width:w, height:h });
+      form.removeField(sigField);
+    }catch(e){ console.warn("signature stamp skipped:", e.message); }
+  }
+
   return await doc.save();
 }
 function fileName(d){
@@ -515,6 +588,124 @@ function clearEmployeeFields(){
 }
 $("clearForm").addEventListener("click", clearEmployeeFields);
 renderQueue();
+
+/* ================= SIGNATURE CAPTURE ================= */
+let sigDataUrl = localStorage.getItem("pafSig") || null;   // saved signature (transparent PNG)
+let sigTypeFont = "'Brush Script MT', cursive";
+
+function markSigState(){
+  const el=$("sigState");
+  if(sigDataUrl){ el.textContent="saved \u2713"; el.classList.add("saved"); }
+  else { el.textContent="none saved"; el.classList.remove("saved"); }
+}
+if(sigDataUrl){ $("sigRemember").checked=true; }
+markSigState();
+
+/* tabs */
+$("sigTabs").addEventListener("click", e=>{
+  const t=e.target.dataset.t; if(!t) return;
+  $("sigTabs").querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.t===t));
+  document.querySelectorAll(".sigpanel").forEach(p=>p.hidden = p.dataset.panel!==t);
+});
+
+/* --- draw pad --- */
+const canvas=$("sigCanvas"), ctx=canvas.getContext("2d");
+function sizeCanvas(){
+  const ratio=window.devicePixelRatio||1;
+  const rect=canvas.getBoundingClientRect();
+  canvas.width=rect.width*ratio; canvas.height=rect.height*ratio;
+  ctx.scale(ratio,ratio); ctx.lineWidth=2.4; ctx.lineCap="round"; ctx.lineJoin="round";
+  ctx.strokeStyle="#0f1e5a";
+}
+let drawing=false, hasInk=false, last=null;
+function pos(e){
+  const r=canvas.getBoundingClientRect();
+  const p=e.touches?e.touches[0]:e;
+  return {x:p.clientX-r.left, y:p.clientY-r.top};
+}
+function start(e){ drawing=true; last=pos(e); e.preventDefault(); }
+function move(e){
+  if(!drawing) return;
+  const p=pos(e);
+  ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+  last=p; hasInk=true; e.preventDefault();
+}
+function end(){ drawing=false; }
+["pointerdown"].forEach(ev=>canvas.addEventListener(ev,start));
+["pointermove"].forEach(ev=>canvas.addEventListener(ev,move));
+["pointerup","pointerleave","pointercancel"].forEach(ev=>canvas.addEventListener(ev,end));
+requestAnimationFrame(sizeCanvas);
+$("sigDetails").addEventListener("toggle", ()=>{ if($("sigDetails").open) requestAnimationFrame(sizeCanvas); });
+
+/* --- typed --- */
+$("sigFonts").addEventListener("click", e=>{
+  if(!e.target.dataset.f) return;
+  sigTypeFont=e.target.dataset.f;
+  $("sigFonts").querySelectorAll("button").forEach(b=>b.classList.toggle("on", b===e.target));
+  renderTyped();
+});
+function renderTyped(){
+  const v=$("sigTypeInput").value.trim();
+  const pv=$("sigTypePreview");
+  pv.innerHTML = v ? `<span class="typed" style="font-family:${sigTypeFont}">${v.replace(/</g,"&lt;")}</span>` : "";
+}
+$("sigTypeInput").addEventListener("input", renderTyped);
+
+/* --- upload --- */
+let uploadDataUrl=null;
+$("sigUpload").addEventListener("change", e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ uploadDataUrl=rd.result; $("sigUploadPreview").innerHTML=`<img src="${uploadDataUrl}">`; };
+  rd.readAsDataURL(f);
+});
+
+/* --- produce a transparent PNG from whichever tab is active --- */
+function activeTab(){ return $("sigTabs").querySelector("button.on").dataset.t; }
+function typedToPng(){
+  const v=$("sigTypeInput").value.trim(); if(!v) return null;
+  const c=document.createElement("canvas"); c.width=600; c.height=150;
+  const x=c.getContext("2d");
+  x.fillStyle="#0f1e5a"; x.textBaseline="middle"; x.textAlign="center";
+  let size=70; x.font=`${size}px ${sigTypeFont}`;
+  while(x.measureText(v).width>560 && size>20){ size-=4; x.font=`${size}px ${sigTypeFont}`; }
+  x.fillText(v, 300, 80);
+  return c.toDataURL("image/png");
+}
+function currentSig(){
+  const t=activeTab();
+  if(t==="draw") return hasInk ? canvas.toDataURL("image/png") : null;
+  if(t==="type") return typedToPng();
+  if(t==="upload") return uploadDataUrl;
+  return null;
+}
+
+$("sigSave").addEventListener("click", ()=>{
+  const png=currentSig();
+  if(!png){ toast("Add a signature first — draw, type, or upload."); return; }
+  sigDataUrl=png;
+  if($("sigRemember").checked) localStorage.setItem("pafSig", png);
+  else localStorage.removeItem("pafSig");
+  markSigState();
+  toast("Signature saved — it will be applied to your PAFs.");
+});
+$("sigClear").addEventListener("click", ()=>{
+  const t=activeTab();
+  if(t==="draw"){ ctx.clearRect(0,0,canvas.width,canvas.height); hasInk=false; }
+  else if(t==="type"){ $("sigTypeInput").value=""; renderTyped(); }
+  else { uploadDataUrl=null; $("sigUpload").value=""; $("sigUploadPreview").innerHTML=""; }
+  sigDataUrl=null; localStorage.removeItem("pafSig"); $("sigRemember").checked=false;
+  markSigState();
+  toast("Signature cleared.");
+});
+
+function sigBytes(){
+  if(!sigDataUrl) return null;
+  const b64=sigDataUrl.split(",")[1];
+  const bin=atob(b64); const arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return {bytes:arr, isPng: sigDataUrl.startsWith("data:image/png")};
+}
 
 /* ---------- bulk: same reason for everyone ---------- */
 $("bulkCode").innerHTML = $("sepCode").innerHTML;   // reuse the full grouped code list
