@@ -1,0 +1,40 @@
+PAF GENERATOR — LICENSE
+
+Copyright (c) 2026 Tinale Bradley
+
+INTERNAL USE LICENSE
+
+Permission is granted to employees and authorized representatives of
+Securitas Critical Infrastructure Services, Inc. (SCIS) to use this
+tool free of charge for the purpose of preparing Personnel Action
+Forms in the course of their work.
+
+Conditions:
+
+1. Use. The tool may be used, copied, and shared within the
+   organization for legitimate business purposes.
+
+2. Modification. Modifications for internal business use are
+   permitted. Modified copies must retain this notice.
+
+3. The embedded form. The Personnel Action Form (SCIS-PAF-5000)
+   embedded in this tool is the property of Securitas Critical
+   Infrastructure Services, Inc. Nothing in this license transfers
+   any rights to the form itself. Use of the form remains subject
+   to company policy.
+
+4. No redistribution outside the organization. This tool may not be
+   sold, sublicensed, or redistributed for use outside SCIS without
+   written permission from the copyright holder.
+
+5. Data. The tool processes all information locally in the browser
+   and transmits nothing. Users remain responsible for handling any
+   completed forms in accordance with company policy and applicable
+   privacy requirements.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OF THE
+SOFTWARE.
