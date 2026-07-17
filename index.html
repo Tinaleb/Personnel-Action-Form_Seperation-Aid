@@ -82,6 +82,30 @@
   .sigactions{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;}
   .sigremember{font-size:12.5px; color:var(--slate); font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer;}
   .sigremember input{width:auto;}
+  /* voice */
+  .voicebar{display:flex; gap:14px; align-items:flex-start; padding:14px; margin-bottom:18px;
+    border:1px solid var(--line); border-radius:8px; background:linear-gradient(180deg,#FBFAF9,#F4F2EF);}
+  .mic{flex:none; display:flex; flex-direction:column; align-items:center; gap:4px; width:88px; padding:12px 8px;
+    border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; transition:.15s;}
+  .mic:hover{border-color:var(--red);}
+  .mic .micicon{font-size:26px; line-height:1;}
+  .mic .miclabel{font-size:11px; font-weight:600; color:var(--slate); text-align:center;}
+  .mic.listening{background:var(--red); border-color:var(--red);}
+  .mic.listening .miclabel{color:#fff;}
+  .mic.listening .micicon{animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+  .voicebody{flex:1; min-width:0;}
+  .voicehint{font-size:12.5px; color:var(--slate); line-height:1.5;}
+  .transcript{margin-top:8px; font-size:14px; color:var(--ink); background:#fff; border:1px solid var(--line);
+    border-radius:6px; padding:8px 10px; min-height:20px;}
+  .transcript .interim{color:var(--slate);}
+  .captured{margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;}
+  .chip{font-size:12px; padding:4px 9px; border-radius:20px; border:1px solid var(--line); background:#fff;}
+  .chip b{color:var(--ink);}
+  .chip.got{border-color:var(--ok); background:#F1F8F3;}
+  .chip.got b{color:var(--ok);}
+  .chip.miss{border-color:var(--warn); background:#FBF5EC; color:var(--warn);}
+  .voiceunsupported{font-size:12.5px; color:var(--warn); margin-top:6px;}
   footer{max-width:1180px; margin:0 auto; padding:8px 20px 26px; font-size:12px; color:var(--slate);}
 </style>
 </head>
@@ -97,6 +121,18 @@
   <section class="card">
     <h2><b>&#9632;</b> Employee Separation</h2>
     <div class="body">
+      <div class="voicebar" id="voiceBar">
+        <button type="button" class="mic" id="micBtn" aria-label="Speak the separation">
+          <span class="micicon">&#127908;</span>
+          <span class="miclabel" id="micLabel">Tap and speak</span>
+        </button>
+        <div class="voicebody">
+          <div class="voicehint" id="voiceHint">Say it in plain English — e.g. &ldquo;Marcus Johnson at Wilkes Barre walked off the job July 12th, $21.75 an hour.&rdquo; I&rsquo;ll fill the fields for you to review.</div>
+          <div class="transcript" id="transcript" hidden></div>
+          <div class="captured" id="captured" hidden></div>
+        </div>
+      </div>
+
       <div class="grid">
         <div>
           <label>Employee name <span class="req">*</span></label>
@@ -797,6 +833,250 @@ $("bulkAdd").addEventListener("click", ()=>{
   toast(rows.length+" employees added to batch.");
   $("bulkNames").value=""; $("bulkCount").textContent="";
 });
+
+/* ================= VOICE: speak the whole separation ================= */
+// ---- Natural-language separation parser (browser-independent core) ----
+const SITES = [
+  {canon:"GDOTS Scranton", keys:["scranton"]},
+  {canon:"GDOTS Wilkes Barre", keys:["wilkes barre","wilkes-barre","wilkesbarre","wilkes"]},
+  {canon:"GDOTS Hanover", keys:["hanover"]},
+  {canon:"GDOTS Red Lion", keys:["red lion","redlion"]},
+  {canon:"GDOTS NEPA Multi-Site", keys:["nepa","multi-site","multi site"]},
+];
+
+// separation keyword -> code. Order matters (most specific first).
+const CODE_RULES = [
+  [/no[\s-]*call[\s-]*no[\s-]*show|no call no show|nc\/?ns/i, "11"],
+  [/walk(ed)?\s*off|abandon/i, "22"],
+  [/another job|accept(ed)? (a|another) (job|position)|new job/i, "14"],
+  [/in lieu of (a )?termination/i, "26"],
+  [/retire/i, "10"],
+  [/attend school|go to school|going to school|for school/i, "25"],
+  [/transportation|no ride|car (broke|trouble)/i, "17"],
+  [/health (reason|issue)|medical reason|due to health/i, "19"],
+  [/relocat|moving|move (away|out)|leave (the )?area/i, "15"],
+  [/personal reason|personal/i, "16"],
+  [/never (worked|showed|reported)|accepted.*never/i, "06"],
+  [/refused (an )?(offer|work)/i, "09"],
+  [/failed to return.*(loa|leave)/i, "08"],
+  [/unhappy|dissatisf|hate(d)? the job/i, "21"],
+  [/no notice|without notice|didn'?t give notice/i, "02"],
+  // involuntary
+  [/under the influence|intoxicat|drunk|high on/i, "31"],
+  [/absentee|attendance|tardi/i, "42"],
+  [/misuse|destruct(ion)? of (company|client)? ?property|damag/i, "45"],
+  [/violat(ed|ion).*(policy|rule)|policy violation/i, "48"],
+  [/insubordinat/i, "49"],
+  [/sleep(ing)? on (the )?(job|post|duty)/i, "50"],
+  [/unsatisfactory|poor (work|performance)|performance issue/i, "51"],
+  [/verify (employment )?eligibilit|i-?9/i, "52"],
+  [/unauthorized removal|theft|stole|stealing/i, "53"],
+  [/falsif|lied on|fake(d)?/i, "58"],
+  [/clearance/i, "59"],
+  [/failure to meet|didn'?t meet (job )?requirement/i, "60"],
+  [/misconduct outside/i, "77"],
+  [/loss of (license|credential)|lost (his|her|their)? ?(license|credential)/i, "90"],
+  // layoff / other
+  [/contract expir/i, "74"],
+  [/lack of work|laid off|layoff/i, "76"],
+  [/deceased|passed away|died/i, "99"],
+  // generic fallbacks (least specific)
+  [/discharg|terminat|fired|let go/i, "48"],   // generic involuntary -> policy violation (review)
+  [/quit|resign/i, "16"],                        // generic voluntary -> personal (review)
+];
+
+const ONES = {zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,
+  eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,
+  twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
+const ORD = {first:1,second:2,third:3,fourth:4,fifth:5,sixth:6,seventh:7,eighth:8,ninth:9,tenth:10,
+  eleventh:11,twelfth:12,thirteenth:13,fourteenth:14,fifteenth:15,sixteenth:16,seventeenth:17,eighteenth:18,
+  nineteenth:19,twentieth:20,"twenty-first":21,"twenty first":21,"twenty-second":22,"twenty second":22,
+  "twenty-third":23,"twenty third":23,"twenty-fourth":24,"twenty-fifth":25,"twenty fifth":25,
+  "twenty-sixth":26,"twenty-seventh":27,"twenty-eighth":28,"twenty-ninth":29,"thirtieth":30,"thirty-first":31};
+const MONTHS = {january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,
+  october:10,november:11,december:12,jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+
+function wordToNum(w){
+  if(w==null) return null;
+  w=w.toLowerCase().trim();
+  const ordNum=w.match(/^(\d+)(?:st|nd|rd|th)$/); if(ordNum) return parseInt(ordNum[1]);
+  if(/^\d+$/.test(w)) return parseInt(w);
+  if(ORD[w]!=null) return ORD[w];
+  if(ONES[w]!=null) return ONES[w];
+  const m=w.match(/^(twenty|thirty)[\s-](one|two|three|four|five|six|seven|eight|nine)$/);
+  if(m) return ONES[m[1]]+ONES[m[2]];
+  return null;
+}
+
+function pad(n){ return String(n).padStart(2,"0"); }
+
+function parseDate(text, todayISO){
+  const t=text.toLowerCase();
+  const today = todayISO ? new Date(todayISO+"T00:00:00") : new Date();
+  if(/\btoday\b/.test(t)) return today.toISOString().slice(0,10);
+  if(/\byesterday\b/.test(t)){ const d=new Date(today); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); }
+  // numeric mm/dd or mm/dd/yyyy
+  let m=t.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+  if(m){ let[,mo,d,y]=m; y=y?(y.length===2?"20"+y:y):String(today.getFullYear());
+    return `${y}-${pad(+mo)}-${pad(+d)}`; }
+  // "July 12" / "July twelfth" / "July 12 2026" / "the 12th of July"
+  const monthNames=Object.keys(MONTHS).join("|");
+  m=t.match(new RegExp(`\\b(${monthNames})\\b[\\s,]*((?:twenty[\\s-])?[a-z0-9]+)(?:(?:st|nd|rd|th)?)[\\s,]*(\\d{4})?`,"i"));
+  if(m){
+    const mo=MONTHS[m[1]]; const day=wordToNum(m[2]); let y=m[3]?+m[3]:today.getFullYear();
+    if(mo&&day) return `${y}-${pad(mo)}-${pad(day)}`;
+  }
+  // "the 12th of July"
+  m=t.match(new RegExp(`\\b((?:twenty[\\s-])?[a-z0-9]+)(?:st|nd|rd|th)?\\s+of\\s+(${monthNames})`,"i"));
+  if(m){ const day=wordToNum(m[1]); const mo=MONTHS[m[2]]; let y=today.getFullYear();
+    if(mo&&day) return `${y}-${pad(mo)}-${pad(day)}`; }
+  return "";
+}
+
+function parseRate(text){
+  const t=text.toLowerCase();
+  // explicit "$21.75" or "$23"
+  let m=t.match(/\$\s*(\d{1,3})(?:\.(\d{1,2}))?/);
+  if(m) return `$${m[1]}.${(m[2]||"00").padEnd(2,"0")}/hr`;
+  // decimal pay "21.50 an hour" / "21.75/hr"
+  m=t.match(/\b(\d{1,3})\.(\d{2})\b\s*(?:an?\s*hour|\/?\s*hr|per hour|hourly)?/);
+  if(m) return `$${m[1]}.${m[2]}/hr`;
+  // "21 dollars 50 cents" / "23 dollars"
+  m=t.match(/(\d{1,3})\s*dollars?(?:\s*(?:and\s*)?(\d{1,2})\s*cents?)?/);
+  if(m) return `$${m[1]}.${m[2]?pad(+m[2]):"00"}/hr`;
+  // spoken two-number form only when 'an hour' follows immediately: "21 75 an hour"
+  m=t.match(/\b(\d{1,3})\s+(\d{2})\s+(?:an?\s*hour|per hour)/);
+  if(m) return `$${m[1]}.${m[2]}/hr`;
+  // word numbers "twenty one seventy five an hour"
+  m=t.match(/((?:twenty|thirty)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?)\s+((?:seventy|sixty|fifty|forty|thirty|twenty|ten|zero)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?)\s*(?:an?\s*hour|per hour|hourly)/);
+  if(m){ const d=wordToNum(m[1].replace(/\s/,"-"))??wordToNum(m[1]); const c=wordToNum(m[2].replace(/\s/,"-"))??wordToNum(m[2]);
+    if(d!=null&&c!=null) return `$${d}.${pad(c)}/hr`; }
+  // whole-dollar words "twenty three dollars an hour"
+  m=t.match(/((?:twenty|thirty)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?)\s*(?:an?\s*hour|per hour|dollars? an hour|dollars? per hour)/);
+  if(m){ const d=wordToNum(m[1].replace(/\s/,"-"))??wordToNum(m[1]); if(d!=null) return `$${d}.00/hr`; }
+  return "";
+}
+
+function findSite(text){
+  const t=text.toLowerCase();
+  for(const s of SITES) for(const k of s.keys) if(t.includes(k)) return s.canon;
+  return "";
+}
+
+function findCode(text){
+  for(const [re,code] of CODE_RULES) if(re.test(text)) return code;
+  return "";
+}
+
+function parseName(text){
+  let t=text.trim();
+  const marker=/\b(at|from|was|were|is|got|has|had|quit\w*|resign\w*|retir\w*|walk\w*|abandon\w*|discharg\w*|terminat\w*|fired|laid|layoff|let go|no[\s-]?call|no[\s-]?show|passed away|deceased|died|sleeping|violat\w*|insubordinat\w*|under the influence|intoxicat\w*|absentee\w*|attendance|tardi\w*|falsif\w*|clearance|misconduct|refused|effective|last\s+(date\s+)?worked|making|earning|for\s+(personal|excessive|violating|sleeping|unsatisf)|due to|because|\$|\d{1,2}[\/\-]\d{1,2})\b/i;
+  const mm=t.match(marker);
+  let head = (mm && mm.index>0) ? t.slice(0, mm.index) : (mm ? "" : t.split(/\s+/).slice(0,3).join(" "));
+  head=head.replace(/\b(mr|mrs|ms|dr)\.?\b/gi,"").replace(/[^a-zA-Z\s'-]/g,"").trim();
+  const parts=head.split(/\s+/).filter(Boolean);
+  if(parts.length===0) return "";
+  if(parts.length===1) return cap(parts[0]);
+  const last=parts[parts.length-1];
+  const first=parts.slice(0,parts.length-1).map(cap).join(" ");
+  return `${cap(last)}, ${first}`;
+}
+function cap(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); }
+
+function parseSpokenSeparation(text, todayISO){
+  const code=findCode(text);
+  return {
+    name: parseName(text),
+    site: findSite(text),
+    code,
+    ldw: parseDate(text, todayISO),
+    rate: parseRate(text),
+  };
+}
+
+/* ---- speech recognition + apply ---- */
+(function(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn=$("micBtn"), micLabel=$("micLabel"), voiceHint=$("voiceHint"),
+        transcriptEl=$("transcript"), capturedEl=$("captured");
+
+  if(!SR){
+    micBtn.disabled=true; micBtn.style.opacity=".5"; micBtn.style.cursor="not-allowed";
+    const note=document.createElement("div");
+    note.className="voiceunsupported";
+    note.textContent="Voice input needs Chrome or Edge. You can still type normally.";
+    voiceHint.after(note);
+    return;
+  }
+
+  const rec=new SR();
+  rec.lang="en-US"; rec.interimResults=true; rec.continuous=false; rec.maxAlternatives=1;
+  let listening=false, finalText="";
+
+  function setListening(on){
+    listening=on;
+    micBtn.classList.toggle("listening", on);
+    micLabel.textContent = on ? "Listening\u2026" : "Tap and speak";
+  }
+
+  micBtn.addEventListener("click", ()=>{
+    if(listening){ rec.stop(); return; }
+    finalText=""; transcriptEl.hidden=false; transcriptEl.innerHTML='<span class="interim">\u2026</span>';
+    capturedEl.hidden=true; capturedEl.innerHTML="";
+    try{ rec.start(); }catch(e){}
+  });
+
+  rec.onstart=()=>setListening(true);
+  rec.onerror=(e)=>{
+    setListening(false);
+    if(e.error==="not-allowed"||e.error==="service-not-allowed")
+      transcriptEl.innerHTML='<span class="interim">Microphone blocked \u2014 allow mic access in your browser and try again.</span>';
+  };
+  rec.onend=()=>{ setListening(false); if(finalText) apply(finalText); };
+
+  rec.onresult=(ev)=>{
+    let interim="", fin="";
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const chunk=ev.results[i][0].transcript;
+      if(ev.results[i].isFinal) fin+=chunk; else interim+=chunk;
+    }
+    if(fin) finalText=(finalText+" "+fin).trim();
+    transcriptEl.innerHTML = (finalText?finalText+" ":"") + '<span class="interim">'+interim+"</span>";
+  };
+
+  function chip(label, val, got){
+    const c=document.createElement("span");
+    c.className="chip "+(got?"got":"miss");
+    c.innerHTML = got ? `${label}: <b>${val}</b>` : `${label}: not caught`;
+    return c;
+  }
+
+  function apply(text){
+    transcriptEl.hidden=false; transcriptEl.textContent=text;
+    const r=parseSpokenSeparation(text, todayISO());
+
+    if(r.name) $("empName").value=r.name;
+    if(r.site) $("site").value=r.site;
+    if(r.rate) $("rate").value=r.rate;
+    if(r.ldw){ $("ldw").value=r.ldw; if(!$("effDate").value)$("effDate").value=r.ldw; if(!$("ldp").value)$("ldp").value=r.ldw; }
+    let codeLabel="";
+    if(r.code){
+      const opt=[...$("sepCode").options].find(o=>o.value.startsWith(r.code+" "));
+      if(opt){ $("sepCode").value=opt.value; $("sepCode").dispatchEvent(new Event("change")); codeLabel=opt.value; }
+    }
+
+    capturedEl.hidden=false; capturedEl.innerHTML="";
+    capturedEl.appendChild(chip("Name", r.name, !!r.name));
+    capturedEl.appendChild(chip("Site", r.site, !!r.site));
+    capturedEl.appendChild(chip("What happened", codeLabel.replace(/ - /g," "), !!r.code));
+    capturedEl.appendChild(chip("Last worked", r.ldw?fmtDate(r.ldw):"", !!r.ldw));
+    if(r.rate) capturedEl.appendChild(chip("Rate", r.rate, true));
+
+    const missing=[!r.name&&"name",!r.site&&"site",!r.code&&"what happened",!r.ldw&&"last date worked"].filter(Boolean);
+    toast(missing.length ? "Got it \u2014 add "+missing.join(", ")+" and review." : "Got it \u2014 please review, then download.");
+  }
+})();
+
 </script>
 </body>
 </html>

@@ -31,7 +31,17 @@ Address, phone, SSN last four, refunds, and comments live under *More fields (op
 
 ---
 
-## Signing (optional)
+## Voice entry (optional)
+
+At the top of the form, tap **Tap and speak** and describe the separation in plain English:
+
+> "Marcus Johnson at Wilkes Barre walked off the job July 12th, twenty-one seventy-five an hour."
+
+The app pulls out the name, site, what happened, last date worked, and pay rate, and fills the fields for you — then shows a row of chips confirming what it caught and flagging anything it missed. **Always glance over the fields before downloading**; voice gets you 90% there, and you fix the rest by hand. You don't have to say things in any particular order, and you can leave out anything you don't have.
+
+Voice needs Chrome or Edge and a working microphone. The audio is transcribed by the browser; nothing about the employee is stored or sent by the app itself. If voice isn't available, the note under the mic says so and you type normally.
+
+---
 
 Under **Signature**, you can sign the *Requested by* line without any other software — three ways:
 
